@@ -1,0 +1,6 @@
+{
+  "name": "BTAudioWalkieTalkie",
+  "description": "Peer-to-peer full-duplex Bluetooth RFCOMM voice walkie-talkie Android app in Kotlin with dual-device simulator, AudioRecord/AudioTrack engine, and exportable Android Studio project.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
