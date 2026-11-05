@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Package BTAudioWalkieTalkie.apk
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for Gradle wrapper
+        run: |
+          cd android-project || true
+          chmod +x gradlew || true
+
+      - name: Build Debug APK with Gradle
+        run: |
+          if [ -f android-project/gradlew ]; then
+            cd android-project && ./gradlew assembleDebug --stacktrace
+          else
+            echo "Building with standalone APK toolchain..."
+            sudo apt-get update && sudo apt-get install -y aapt zipalign apksigner dalvik-exchange
+            bash scripts/build_standalone_apk.sh
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTAudioWalkieTalkie-APK
+          path: |
+            public/BTAudioWalkieTalkie.apk
+            android-project/BTAudioWalkieTalkie.apk
+            android-project/app/build/outputs/apk/debug/*.apk
+          retention-days: 30

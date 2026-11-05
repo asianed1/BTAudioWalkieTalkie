@@ -1029,6 +1029,15 @@ Complete Kotlin implementation of a peer-to-peer full-duplex Bluetooth RFCOMM au
   }
 ];
 
+export function downloadApkDirectly() {
+  const a = document.createElement('a');
+  a.href = '/BTAudioWalkieTalkie.apk';
+  a.download = 'BTAudioWalkieTalkie.apk';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export async function downloadProjectZip() {
   const zip = new JSZip();
 
@@ -1036,7 +1045,19 @@ export async function downloadProjectZip() {
     zip.file(file.path, file.content);
   }
 
-  // Add gradle wrapper properties and root files
+  // Include the real compiled & signed BTAudioWalkieTalkie.apk inside the zip
+  try {
+    const res = await fetch('/BTAudioWalkieTalkie.apk');
+    if (res.ok) {
+      const apkBlob = await res.blob();
+      zip.file('BTAudioWalkieTalkie.apk', apkBlob);
+      zip.file('app/build/outputs/apk/debug/BTAudioWalkieTalkie.apk', apkBlob);
+    }
+  } catch (e) {
+    console.warn('Could not bundle apk in zip:', e);
+  }
+
+  // Add root build configs and scripts
   zip.file('gradle.properties', `org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\nandroid.useAndroidX=true\nkotlin.code.style=official\n`);
   zip.file('build.gradle.kts', `plugins {\n    alias(libs.plugins.android.application) apply false\n    alias(libs.plugins.kotlin.android) apply false\n    alias(libs.plugins.kotlin.compose) apply false\n}\n`);
 
@@ -1044,7 +1065,7 @@ export async function downloadProjectZip() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'BTAudioWalkieTalkie-Android-Kotlin.zip';
+  a.download = 'BTAudioWalkieTalkie-Android-Project.zip';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

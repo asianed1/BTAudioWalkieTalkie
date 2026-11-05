@@ -19,7 +19,7 @@ import { TelemetryConsole } from './components/TelemetryConsole';
 import { CodeInspector } from './components/CodeInspector';
 import { TestRunner } from './components/TestRunner';
 import { ConnectionState, DeviceInfo, AudioTelemetry, PacketLog } from './types';
-import { downloadProjectZip } from './services/androidProjectFiles';
+import { downloadProjectZip, downloadApkDirectly } from './services/androidProjectFiles';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'SIMULATOR' | 'CODE' | 'TESTS' | 'ARCHITECTURE'>('SIMULATOR');
@@ -334,14 +334,25 @@ export default function App() {
             </button>
           </div>
 
-          {/* Download Button */}
-          <button
-            onClick={() => downloadProjectZip()}
-            className="hidden sm:flex px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white font-semibold text-xs items-center gap-2 shadow-md shadow-sky-500/20 transition"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download Project (.ZIP)
-          </button>
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => downloadApkDirectly()}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition"
+              title="Download installable BTAudioWalkieTalkie.apk"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download APK (.apk)
+            </button>
+
+            <button
+              onClick={() => downloadProjectZip()}
+              className="hidden sm:flex px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs items-center gap-1.5 transition"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-400" />
+              Project (.ZIP)
+            </button>
+          </div>
         </div>
       </header>
 

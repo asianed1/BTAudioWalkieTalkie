@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0F172A"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BTAudioWalkieTalkie"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="RFCOMM 16kHz PCM Full-Duplex"
+        android:textColor="#94A3B8"
+        android:textSize="12sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Status: Disconnected"
+        android:background="#1E293B"
+        android:textColor="#38BDF8"
+        android:padding="12dp"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btnHost"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Host Link"
+            android:backgroundTint="#0284C7"
+            android:textColor="#FFFFFF"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btnScan"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Scan Peers"
+            android:backgroundTint="#334155"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvMetrics"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="AEC: Hardware Ready | Format: 16kHz 16-bit Mono (256 kbps)"
+        android:textColor="#64748B"
+        android:textSize="11sp"
+        android:layout_marginBottom="16dp" />
+
+    <ListView
+        android:id="@+id/listDevices"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#1E293B"
+        android:divider="#334155"
+        android:dividerHeight="1dp"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/btnMuteToggle"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="MIC LIVE (FULL DUPLEX)"
+        android:backgroundTint="#10B981"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnDisconnect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Disconnect Voice Link"
+        android:backgroundTint="#EF4444"
+        android:textColor="#FFFFFF" />
+
+</LinearLayout>
