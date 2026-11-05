@@ -168,9 +168,63 @@ describe('BTAudioWalkieTalkie Standard Architecture Tests', () => {
   test('Test 10: Kotlin Unit Test Files Existence in Project Structure', () => {
     const test1 = path.resolve(process.cwd(), 'android-project/app/src/test/java/com/example/btaudiowalkietalkie/AudioEngineTest.kt');
     const test2 = path.resolve(process.cwd(), 'android-project/app/src/test/java/com/example/btaudiowalkietalkie/BluetoothControllerTest.kt');
+    const test3 = path.resolve(process.cwd(), 'android-project/app/src/test/java/com/example/btaudiowalkietalkie/WifiAudioControllerTest.kt');
 
     assert.ok(fs.existsSync(test1), 'AudioEngineTest.kt must exist');
     assert.ok(fs.existsSync(test2), 'BluetoothControllerTest.kt must exist');
+    assert.ok(fs.existsSync(test3), 'WifiAudioControllerTest.kt must exist');
+  });
+
+  test('Test 11: Wi-Fi Hotspot Multicast Protocol & Port Compliance', () => {
+    const wifiControllerPath = path.resolve(process.cwd(), 'android-project/app/src/main/java/com/example/btaudiowalkietalkie/wifi/WifiAudioController.kt');
+    assert.ok(fs.existsSync(wifiControllerPath), 'WifiAudioController.kt must exist');
+
+    const content = fs.readFileSync(wifiControllerPath, 'utf8');
+
+    // Multicast Port & Group IP
+    assert.ok(content.includes('DEFAULT_PORT = 50005'), 'Must use Port 50005 for UDP Multicast');
+    assert.ok(content.includes('239.255.0.1'), 'Must use 239.255.0.1 group address');
+    assert.ok(content.includes('WTLK'), 'Must define magic bytes WTLK for packet identification');
+    assert.ok(content.includes('MulticastSocket'), 'Must instantiate MulticastSocket');
+  });
+
+  test('Test 12: Android Wi-Fi MulticastLock Verification', () => {
+    const wifiControllerPath = path.resolve(process.cwd(), 'android-project/app/src/main/java/com/example/btaudiowalkietalkie/wifi/WifiAudioController.kt');
+    const content = fs.readFileSync(wifiControllerPath, 'utf8');
+
+    // On Android, Wi-Fi driver will drop multicast packets unless MulticastLock is acquired
+    assert.ok(content.includes('createMulticastLock'), 'Must call createMulticastLock to prevent kernel packet drop');
+    assert.ok(content.includes('acquire()'), 'Must acquire MulticastLock');
+    assert.ok(content.includes('release()'), 'Must release MulticastLock during cleanup');
+  });
+
+  test('Test 13: Wi-Fi Permissions Audit in AndroidManifest.xml', () => {
+    const manifestPath = path.resolve(process.cwd(), 'android-project/app/src/main/AndroidManifest.xml');
+    const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+
+    assert.ok(manifestContent.includes('android.permission.INTERNET'), 'INTERNET permission required for UDP sockets');
+    assert.ok(manifestContent.includes('android.permission.ACCESS_WIFI_STATE'), 'ACCESS_WIFI_STATE required for Wi-Fi info');
+    assert.ok(manifestContent.includes('android.permission.CHANGE_WIFI_MULTICAST_STATE'), 'CHANGE_WIFI_MULTICAST_STATE required for multicast');
+  });
+
+  test('Test 14: Dual Mode Radio Selector Labels Compliance', () => {
+    const screenPath = path.resolve(process.cwd(), 'android-project/app/src/main/java/com/example/btaudiowalkietalkie/ui/WalkieTalkieScreen.kt');
+    const screenContent = fs.readFileSync(screenPath, 'utf8');
+
+    // Verify low power / short range / 2 persons and high power / long range / 2-10 phones
+    assert.ok(screenContent.includes('Low power consumption · Short range (~25m) · 2 persons') || 
+              screenContent.includes('low power consumption'), 'Must include Bluetooth low power consumption label');
+    assert.ok(screenContent.includes('High power consumption · Long range (~100m) · 2–10 phones') ||
+              screenContent.includes('high power consumption'), 'Must include Wi-Fi Hotspot high power consumption label');
+  });
+
+  test('Test 15: Standalone Signed APK File & Manifest Verification', () => {
+    const apkPath = path.resolve(process.cwd(), 'public/BTAudioWalkieTalkie.apk');
+    assert.ok(fs.existsSync(apkPath), 'public/BTAudioWalkieTalkie.apk must exist');
+
+    const stats = fs.statSync(apkPath);
+    assert.ok(stats.size > 20000, `APK size should be at least 20KB, was ${stats.size} bytes`);
   });
 
 });
+

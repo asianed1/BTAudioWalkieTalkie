@@ -7,22 +7,35 @@ import {
   Download, 
   Sparkles, 
   CheckCircle2, 
-  RefreshCw, 
+  RotateCcw, 
   Volume2, 
   Mic, 
   ShieldCheck, 
-  HelpCircle,
-  ExternalLink
+  Wifi, 
+  Users,
+  Zap,
+  Cpu
 } from 'lucide-react';
 import { PhoneSimulator } from './components/PhoneSimulator';
 import { TelemetryConsole } from './components/TelemetryConsole';
 import { CodeInspector } from './components/CodeInspector';
 import { TestRunner } from './components/TestRunner';
-import { ConnectionState, DeviceInfo, AudioTelemetry, PacketLog } from './types';
+import { RadioMode, ConnectionState, DeviceInfo, AudioTelemetry, PacketLog } from './types';
 import { downloadProjectZip, downloadApkDirectly } from './services/androidProjectFiles';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'SIMULATOR' | 'CODE' | 'TESTS' | 'ARCHITECTURE'>('SIMULATOR');
+
+  // Dual Mode Radio State (Global or synced per device)
+  const [radioMode, setRadioMode] = useState<RadioMode>('BLUETOOTH');
+
+  // Wi-Fi Hotspot State
+  const [isWifiActive, setIsWifiActive] = useState(false);
+  const [activeSpeaker, setActiveSpeaker] = useState<string | undefined>(undefined);
+  const [wifiPeers, setWifiPeers] = useState<string[]>([
+    'Galaxy S24 (Peer 1)',
+    'Pixel 7 Pro (Peer 2 - Field Unit)'
+  ]);
 
   // Phone A (Host) State
   const [stateA, setStateA] = useState<ConnectionState>('disconnected');
@@ -66,29 +79,21 @@ export default function App() {
     latencyMs: 32
   });
 
-  // Discovered devices lists
   const [discoveredByA, setDiscoveredByA] = useState<DeviceInfo[]>([]);
   const [discoveredByB, setDiscoveredByB] = useState<DeviceInfo[]>([]);
 
-  // Real-time packet logs
+  // Logs
   const [logs, setLogs] = useState<PacketLog[]>([
     {
       id: 'init-1',
       timestamp: '10:35:01.120',
       sender: 'Phone A',
       type: 'SOCKET_EVENT',
-      detail: 'BluetoothController initialized. Checking BLUETOOTH_CONNECT & RECORD_AUDIO permissions.'
-    },
-    {
-      id: 'init-2',
-      timestamp: '10:35:01.145',
-      sender: 'Phone B',
-      type: 'SOCKET_EVENT',
-      detail: 'BluetoothController initialized. Adapter enabled.'
+      detail: 'Dual-Mode System Ready: Bluetooth RFCOMM (1-to-1) & Wi-Fi Hotspot Multicast (Group).'
     }
   ]);
 
-  const addLog = (sender: 'Phone A' | 'Phone B', type: PacketLog['type'], detail: string, bytes?: number) => {
+  const addLog = (sender: 'Phone A' | 'Phone B' | 'Phone C (Group)', type: PacketLog['type'], detail: string, bytes?: number) => {
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0')}`;
     setLogs(prev => [
@@ -104,21 +109,27 @@ export default function App() {
     ]);
   };
 
-  const isConnected = stateA === 'connected' && stateB === 'connected';
+  const isBtConnected = stateA === 'connected' && stateB === 'connected';
 
-  // Audio simulation loop: runs when connected and transmitting
+  // Audio simulation loop: runs when either Bluetooth is connected OR Wi-Fi Channel is active
   const audioIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (isConnected) {
+    const isTransmittingLoop = (radioMode === 'BLUETOOTH' && isBtConnected) || (radioMode === 'WIFI_HOTSPOT' && isWifiActive);
+
+    if (isTransmittingLoop) {
       audioIntervalRef.current = window.setInterval(() => {
-        // Phone A Voice Simulation
         const aIsSpeaking = simMicA && !telemetryA.micMuted;
         const bIsSpeaking = simMicB && !telemetryB.micMuted;
 
-        // Generate natural vocal fluctuation between -28dB and -12dB when active, or -60dB when idle
         const levelA = aIsSpeaking ? -22 + (Math.sin(Date.now() / 140) * 8) + (Math.random() * 4) : -60;
         const levelB = bIsSpeaking ? -20 + (Math.cos(Date.now() / 160) * 7) + (Math.random() * 4) : -60;
+
+        if (radioMode === 'WIFI_HOTSPOT') {
+          if (aIsSpeaking) setActiveSpeaker('Pixel 8 Pro (You)');
+          else if (bIsSpeaking) setActiveSpeaker('Galaxy S24 (Field)');
+          else setActiveSpeaker(undefined);
+        }
 
         setTelemetryA(prev => ({
           ...prev,
@@ -130,7 +141,7 @@ export default function App() {
           bytesReceived: prev.bytesReceived + 640,
           packetsSent: prev.packetsSent + 1,
           packetsReceived: prev.packetsReceived + 1,
-          latencyMs: 30 + Math.floor(Math.sin(Date.now() / 800) * 4)
+          latencyMs: radioMode === 'BLUETOOTH' ? 30 + Math.floor(Math.sin(Date.now() / 800) * 4) : 9 + Math.floor(Math.sin(Date.now() / 800) * 3)
         }));
 
         setTelemetryB(prev => ({
@@ -143,16 +154,16 @@ export default function App() {
           bytesReceived: prev.bytesReceived + 640,
           packetsSent: prev.packetsSent + 1,
           packetsReceived: prev.packetsReceived + 1,
-          latencyMs: 31 + Math.floor(Math.cos(Date.now() / 800) * 4)
+          latencyMs: radioMode === 'BLUETOOTH' ? 31 + Math.floor(Math.cos(Date.now() / 800) * 4) : 10 + Math.floor(Math.cos(Date.now() / 800) * 3)
         }));
 
-        // Log audio frames periodically
-        if (Math.random() < 0.15) {
-          if (aIsSpeaking) {
-            addLog('Phone A', 'PCM_AUDIO_CHUNK', 'AudioRecord read 640 B (20ms @ 16kHz) -> BluetoothSocket.outputStream.write()', 640);
-          }
-          if (bIsSpeaking) {
-            addLog('Phone B', 'PCM_AUDIO_CHUNK', 'AudioRecord read 640 B (20ms @ 16kHz) -> BluetoothSocket.outputStream.write()', 640);
+        if (Math.random() < 0.12) {
+          if (radioMode === 'BLUETOOTH') {
+            if (aIsSpeaking) addLog('Phone A', 'PCM_AUDIO_CHUNK', 'AudioRecord 640 B -> BluetoothSocket.outputStream.write()', 640);
+            if (bIsSpeaking) addLog('Phone B', 'PCM_AUDIO_CHUNK', 'AudioRecord 640 B -> BluetoothSocket.outputStream.write()', 640);
+          } else {
+            if (aIsSpeaking) addLog('Phone A', 'WIFI_MULTICAST', 'Multicast UDP datagram broadcast to 239.255.0.1:50005 (Channel 1)', 654);
+            if (bIsSpeaking) addLog('Phone B', 'WIFI_MULTICAST', 'Multicast UDP datagram broadcast to 239.255.0.1:50005 (Channel 1)', 654);
           }
         }
       }, 100);
@@ -164,94 +175,100 @@ export default function App() {
     }
 
     return () => {
-      if (audioIntervalRef.current) {
-        clearInterval(audioIntervalRef.current);
-      }
+      if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
     };
-  }, [isConnected, simMicA, simMicB, telemetryA.micMuted, telemetryB.micMuted]);
+  }, [radioMode, isBtConnected, isWifiActive, simMicA, simMicB, telemetryA.micMuted, telemetryB.micMuted]);
 
-  // Phone A: Host connection
-  const handleHostA = () => {
-    setStateA('listening');
-    addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Opened RFCOMM server socket with UUID 00001101-0000-1000-8000-00805F9B34FB. Blocking accept() waiting for peer.');
+  // Mode Selection Handler
+  const handleSelectRadioMode = (newMode: RadioMode) => {
+    if (newMode === radioMode) return;
+
+    // Disconnect active states
+    setStateA('disconnected');
+    setStateB('disconnected');
+    setIsWifiActive(false);
+    setSimMicA(false);
+    setSimMicB(false);
+    setRadioMode(newMode);
+
+    if (newMode === 'BLUETOOTH') {
+      addLog('Phone A', 'SOCKET_EVENT', 'Switched to Bluetooth Mode: Low power, short range (~25m), 2 persons.');
+    } else {
+      addLog('Phone A', 'SOCKET_EVENT', 'Switched to Wi-Fi Hotspot Mode: High power, long range (~100m), 2–10 phones.');
+    }
   };
 
-  // Phone B: Scan for devices
+  // Bluetooth Actions
+  const handleHostA = () => {
+    setStateA('listening');
+    addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Opened RFCOMM server socket (UUID 00001101-0000-1000-8000-00805F9B34FB).');
+  };
+
   const handleScanB = () => {
     setScanningB(true);
-    addLog('Phone B', 'SOCKET_EVENT', 'Starting Bluetooth discovery (BLUETOOTH_SCAN). Listening for 2.4GHz inquiry responses.');
+    addLog('Phone B', 'SOCKET_EVENT', 'Scanning for nearby Bluetooth peers (BLUETOOTH_SCAN)...');
     setTimeout(() => {
       setScanningB(false);
       setDiscoveredByB([
-        {
-          name: 'Pixel 8 Pro (Walkie-Talkie Host)',
-          address: '78:2B:46:9A:12:34',
-          isPaired: false,
-          rssi: -58
-        },
-        {
-          name: 'Wireless Headset BT5.3',
-          address: 'A4:C3:F0:11:22:33',
-          isPaired: false,
-          rssi: -74
-        }
+        { name: 'Pixel 8 Pro (Walkie-Talkie Host)', address: '78:2B:46:9A:12:34', isPaired: false, rssi: -56 }
       ]);
-      addLog('Phone B', 'SOCKET_EVENT', 'Discovery found 2 devices including "Pixel 8 Pro (Walkie-Talkie Host)".');
-    }, 1200);
+      addLog('Phone B', 'SOCKET_EVENT', 'Found "Pixel 8 Pro (Walkie-Talkie Host)".');
+    }, 1000);
   };
 
-  // Phone B connects to Phone A
   const handleConnectBToA = (device: DeviceInfo) => {
     setStateB('connecting');
-    addLog('Phone B', 'RFCOMM_HANDSHAKE', `Creating RFCOMM client socket to ${device.address} with SPP UUID.`);
-
+    addLog('Phone B', 'RFCOMM_HANDSHAKE', `Connecting RFCOMM socket to ${device.address}...`);
     setTimeout(() => {
-      // Connect both
       setStateA('connected');
       setStateB('connected');
-      // Enable simulation voice on phone A to show instant full-duplex demo
       setSimMicA(true);
-
-      addLog('Phone B', 'RFCOMM_HANDSHAKE', 'RFCOMM connection established with Pixel 8 Pro.');
-      addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Server accepted incoming client socket. Handshake verified.');
-      addLog('Phone A', 'AEC_FILTER', 'AudioEngine launched: AudioRecord(VOICE_COMMUNICATION, 16kHz, 16-bit Mono) + AcousticEchoCanceler enabled on session.');
-      addLog('Phone B', 'AEC_FILTER', 'AudioEngine launched: AudioTrack(STREAM_VOICE_CALL, MODE_STREAM) started. Full-duplex voice loop active.');
-    }, 900);
+      addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Accepted incoming Bluetooth socket. Full-duplex link established.');
+      addLog('Phone B', 'AEC_FILTER', 'Hardware AcousticEchoCanceler enabled on AudioRecord session.');
+    }, 800);
   };
 
-  // One-Click Quick Connect
-  const handleQuickConnect = () => {
+  const handleQuickConnectBt = () => {
+    setRadioMode('BLUETOOTH');
     setStateA('connected');
     setStateB('connected');
     setSimMicA(true);
-    setSimMicB(false);
-    addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Direct RFCOMM session established with Galaxy S24.');
-    addLog('Phone B', 'RFCOMM_HANDSHAKE', 'Direct RFCOMM session established with Pixel 8 Pro.');
-    addLog('Phone A', 'AEC_FILTER', 'Hardware AcousticEchoCanceler enabled on AudioRecord session.');
-    addLog('Phone B', 'AEC_FILTER', 'Hardware AcousticEchoCanceler enabled on AudioRecord session.');
+    addLog('Phone A', 'RFCOMM_HANDSHAKE', 'Auto-connected 1-to-1 Bluetooth RFCOMM session.');
   };
 
-  // Disconnect
-  const handleDisconnect = () => {
+  const handleDisconnectBt = () => {
     setStateA('disconnected');
     setStateB('disconnected');
     setSimMicA(false);
     setSimMicB(false);
-    setTelemetryA(prev => ({ ...prev, isTransmitting: false, isReceiving: false, outgoingDb: -60, incomingDb: -60 }));
-    setTelemetryB(prev => ({ ...prev, isTransmitting: false, isReceiving: false, outgoingDb: -60, incomingDb: -60 }));
-    addLog('Phone A', 'SOCKET_EVENT', 'BluetoothSocket closed. AudioRecord & AudioTrack released cleanly.');
-    addLog('Phone B', 'SOCKET_EVENT', 'BluetoothSocket closed. Background sender/receiver threads terminated.');
+    addLog('Phone A', 'SOCKET_EVENT', 'BluetoothSocket closed. Threads terminated.');
+    addLog('Phone B', 'SOCKET_EVENT', 'BluetoothSocket closed.');
+  };
+
+  // Wi-Fi Actions
+  const handleStartWifiChannel = () => {
+    setIsWifiActive(true);
+    setSimMicA(true);
+    addLog('Phone A', 'WIFI_MULTICAST', 'Joined Wi-Fi Hotspot Channel 1. Multicast lock acquired.');
+    addLog('Phone B', 'WIFI_HEARTBEAT', 'Phone B joined Channel 1 on UDP port 50005. 3 phones online in group.');
+  };
+
+  const handleStopWifiChannel = () => {
+    setIsWifiActive(false);
+    setSimMicA(false);
+    setSimMicB(false);
+    setActiveSpeaker(undefined);
+    addLog('Phone A', 'WIFI_MULTICAST', 'Left Wi-Fi Hotspot Channel 1. Multicast lock released.');
   };
 
   const handleSimulateInterference = () => {
-    addLog('Phone A', 'SOCKET_EVENT', 'WARNING: RFCOMM buffer jitter detected (simulated interference). Latency peaked at 120ms; dropped 2 frames.');
-    setTelemetryA(prev => ({ ...prev, latencyMs: 120 }));
-    setTelemetryB(prev => ({ ...prev, latencyMs: 120 }));
+    addLog('Phone A', 'SOCKET_EVENT', 'Injected jitter/packet loss. Jitter buffer compensated; audio recovered.');
+    setTelemetryA(prev => ({ ...prev, latencyMs: 95 }));
+    setTelemetryB(prev => ({ ...prev, latencyMs: 95 }));
     setTimeout(() => {
-      setTelemetryA(prev => ({ ...prev, latencyMs: 32 }));
-      setTelemetryB(prev => ({ ...prev, latencyMs: 32 }));
-      addLog('Phone B', 'SOCKET_EVENT', 'Buffer resynced. Zero-allocation stream stabilized at 16kHz.');
-    }, 1200);
+      setTelemetryA(prev => ({ ...prev, latencyMs: radioMode === 'BLUETOOTH' ? 32 : 12 }));
+      setTelemetryB(prev => ({ ...prev, latencyMs: radioMode === 'BLUETOOTH' ? 32 : 12 }));
+    }, 1000);
   };
 
   return (
@@ -263,9 +280,13 @@ export default function App() {
           
           {/* Brand */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-teal-400 p-0.5 flex items-center justify-center shadow-lg shadow-sky-500/20">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 via-teal-400 to-emerald-400 p-0.5 flex items-center justify-center shadow-lg shadow-sky-500/20">
               <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <Radio className="w-5 h-5 text-sky-400" />
+                {radioMode === 'BLUETOOTH' ? (
+                  <Radio className="w-5 h-5 text-sky-400" />
+                ) : (
+                  <Wifi className="w-5 h-5 text-emerald-400" />
+                )}
               </div>
             </div>
             <div>
@@ -273,12 +294,12 @@ export default function App() {
                 <h1 className="text-base font-bold text-white tracking-tight">
                   BTAudioWalkieTalkie
                 </h1>
-                <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                  Android Kotlin
+                <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-gradient-to-r from-sky-500/10 to-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Dual-Mode (BT + Wi-Fi)
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Peer-to-Peer Full-Duplex RFCOMM Voice Communication System
+                Peer-to-Peer Voice System: Bluetooth (1-to-1) &amp; Wi-Fi Hotspot (Group)
               </p>
             </div>
           </div>
@@ -330,7 +351,7 @@ export default function App() {
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              Audio Pipeline &amp; RFCOMM
+              Radio Architecture
             </button>
           </div>
 
@@ -359,50 +380,85 @@ export default function App() {
       {/* Main Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
-        {/* TAB 1: DUAL-PHONE SIMULATOR */}
+        {/* TAB 1: DUAL-DEVICE SIMULATOR */}
         {activeTab === 'SIMULATOR' && (
           <div className="flex flex-col gap-6">
             
-            {/* Top Quick Actions & Link Status Indicator */}
+            {/* Global Radio Mode Selector Bar */}
             <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <span className={`w-3 h-3 rounded-full ${
-                  isConnected ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50 animate-pulse' :
-                  (stateA === 'listening' || stateB === 'connecting') ? 'bg-amber-400 animate-pulse' :
-                  'bg-slate-600'
+                  (radioMode === 'BLUETOOTH' ? isBtConnected : isWifiActive)
+                    ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50 animate-pulse'
+                    : 'bg-slate-600'
                 }`} />
                 <div>
                   <div className="text-xs font-semibold text-slate-200 flex items-center gap-2">
-                    {isConnected ? (
-                      <span className="text-emerald-400">Bluetooth RFCOMM Connected (Full-Duplex Voice Link Active)</span>
-                    ) : stateA === 'listening' ? (
-                      <span className="text-sky-400">Phone A Listening as Host • Waiting for Phone B</span>
+                    {radioMode === 'BLUETOOTH' ? (
+                      isBtConnected ? (
+                        <span className="text-sky-400">Bluetooth Mode: 1-to-1 Full-Duplex Link Active (~25m)</span>
+                      ) : (
+                        <span className="text-slate-300">Bluetooth Mode: Low Power · Short Range · 2 Persons</span>
+                      )
                     ) : (
-                      <span className="text-slate-400">P2P Bluetooth Link Disconnected</span>
+                      isWifiActive ? (
+                        <span className="text-emerald-400">Wi-Fi Hotspot Mode: Channel 1 Active (Group Intercom, ~100m)</span>
+                      ) : (
+                        <span className="text-slate-300">Wi-Fi Hotspot Mode: High Power · Long Range · 2–10 Phones</span>
+                      )
                     )}
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    UUID: 00001101-0000-1000-8000-00805F9B34FB • Audio: 16000Hz 16-bit Mono PCM (256 kbps)
+                    {radioMode === 'BLUETOOTH' 
+                      ? 'Serial Port Profile (UUID 00001101-...) · 16kHz 16-bit PCM (256 kbps)'
+                      : 'UDP Multicast (239.255.0.1:50005) · No cellular/internet needed · All-phone broadcast'}
                   </div>
                 </div>
               </div>
 
-              {/* Quick Connect / Disconnect Buttons */}
-              <div className="flex items-center gap-2.5">
-                {!isConnected ? (
+              {/* Mode Quick-Toggle Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleSelectRadioMode('BLUETOOTH')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                    radioMode === 'BLUETOOTH'
+                      ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  Bluetooth Mode
+                </button>
+
+                <button
+                  onClick={() => handleSelectRadioMode('WIFI_HOTSPOT')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                    radioMode === 'WIFI_HOTSPOT'
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Wifi className="w-3.5 h-3.5" />
+                  Wi-Fi Hotspot Mode
+                </button>
+
+                {radioMode === 'BLUETOOTH' && !isBtConnected && (
                   <button
-                    onClick={handleQuickConnect}
-                    className="px-3.5 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
+                    onClick={handleQuickConnectBt}
+                    className="ml-2 px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                    1-Click Auto-Connect Phones
+                    Quick Connect BT
                   </button>
-                ) : (
+                )}
+
+                {radioMode === 'WIFI_HOTSPOT' && !isWifiActive && (
                   <button
-                    onClick={handleDisconnect}
-                    className="px-3.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
+                    onClick={handleStartWifiChannel}
+                    className="ml-2 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
                   >
-                    Disconnect Link
+                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    Join All to Channel 1
                   </button>
                 )}
               </div>
@@ -411,17 +467,19 @@ export default function App() {
             {/* Side-by-Side Smartphone Mockups */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center justify-center p-4 bg-slate-900/40 border border-slate-800/80 rounded-3xl">
               
-              {/* Phone A (Host / Server) */}
+              {/* Phone A */}
               <div className="flex flex-col items-center">
                 <div className="mb-2 text-xs font-semibold text-sky-400 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-sky-400" />
-                  Device 1 (Host / Server Socket)
+                  Device 1 (Pixel 8 Pro)
                 </div>
                 <PhoneSimulator
                   deviceName="Pixel 8 Pro"
-                  deviceModel="Google Pixel 8 Pro (Host)"
+                  deviceModel="Google Pixel 8 Pro"
                   macAddress="78:2B:46:9A:12:34"
                   themeColor="blue"
+                  currentMode={radioMode}
+                  onSelectMode={handleSelectRadioMode}
                   connectionState={stateA}
                   remotePeerName="Galaxy S24"
                   pairedDevices={[
@@ -432,6 +490,9 @@ export default function App() {
                   hasPermissions={permsA}
                   telemetry={telemetryA}
                   isSimulatingMicInput={simMicA}
+                  isWifiActive={isWifiActive}
+                  onlinePeers={wifiPeers}
+                  activeSpeaker={activeSpeaker}
                   onRequestPermissions={() => setPermsA(true)}
                   onHost={handleHostA}
                   onScan={() => {
@@ -445,26 +506,34 @@ export default function App() {
                       setStateB('connected');
                     }, 800);
                   }}
-                  onDisconnect={handleDisconnect}
-                  onToggleMute={() => {
+                  onDisconnectBt={handleDisconnectBt}
+                  onToggleMuteBt={() => {
                     setTelemetryA(prev => ({ ...prev, micMuted: !prev.micMuted }));
                     addLog('Phone A', 'AUDIO', `Microphone ${telemetryA.micMuted ? 'UNMUTED' : 'MUTED'}`);
+                  }}
+                  onStartWifiChannel={handleStartWifiChannel}
+                  onStopWifiChannel={handleStopWifiChannel}
+                  onToggleMuteWifi={() => {
+                    setTelemetryA(prev => ({ ...prev, micMuted: !prev.micMuted }));
+                    addLog('Phone A', 'AUDIO', `Wi-Fi Mic ${telemetryA.micMuted ? 'UNMUTED' : 'MUTED'}`);
                   }}
                   onToggleMicSimulation={() => setSimMicA(!simMicA)}
                 />
               </div>
 
-              {/* Phone B (Client) */}
+              {/* Phone B */}
               <div className="flex flex-col items-center">
                 <div className="mb-2 text-xs font-semibold text-teal-400 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-teal-400" />
-                  Device 2 (Client Socket)
+                  Device 2 (Galaxy S24)
                 </div>
                 <PhoneSimulator
                   deviceName="Galaxy S24"
-                  deviceModel="Samsung Galaxy S24 (Client)"
+                  deviceModel="Samsung Galaxy S24"
                   macAddress="9C:64:5E:28:FE:8B"
                   themeColor="indigo"
+                  currentMode={radioMode}
+                  onSelectMode={handleSelectRadioMode}
                   connectionState={stateB}
                   remotePeerName="Pixel 8 Pro"
                   pairedDevices={[
@@ -475,6 +544,9 @@ export default function App() {
                   hasPermissions={permsB}
                   telemetry={telemetryB}
                   isSimulatingMicInput={simMicB}
+                  isWifiActive={isWifiActive}
+                  onlinePeers={['Pixel 8 Pro (Host)', 'Pixel 7 Pro (Field Unit)']}
+                  activeSpeaker={activeSpeaker}
                   onRequestPermissions={() => setPermsB(true)}
                   onHost={() => {
                     setStateB('listening');
@@ -482,10 +554,16 @@ export default function App() {
                   }}
                   onScan={handleScanB}
                   onConnect={handleConnectBToA}
-                  onDisconnect={handleDisconnect}
-                  onToggleMute={() => {
+                  onDisconnectBt={handleDisconnectBt}
+                  onToggleMuteBt={() => {
                     setTelemetryB(prev => ({ ...prev, micMuted: !prev.micMuted }));
                     addLog('Phone B', 'AUDIO', `Microphone ${telemetryB.micMuted ? 'UNMUTED' : 'MUTED'}`);
+                  }}
+                  onStartWifiChannel={handleStartWifiChannel}
+                  onStopWifiChannel={handleStopWifiChannel}
+                  onToggleMuteWifi={() => {
+                    setTelemetryB(prev => ({ ...prev, micMuted: !prev.micMuted }));
+                    addLog('Phone B', 'AUDIO', `Wi-Fi Mic ${telemetryB.micMuted ? 'UNMUTED' : 'MUTED'}`);
                   }}
                   onToggleMicSimulation={() => setSimMicB(!simMicB)}
                 />
@@ -497,7 +575,10 @@ export default function App() {
             <TelemetryConsole
               telemetryA={telemetryA}
               telemetryB={telemetryB}
-              isConnected={isConnected}
+              isConnected={isBtConnected}
+              isWifiActive={isWifiActive}
+              radioMode={radioMode}
+              onlinePeersCount={wifiPeers.length + 1}
               logs={logs}
               onSimulateInterference={handleSimulateInterference}
               onClearLogs={() => setLogs([])}
@@ -511,134 +592,61 @@ export default function App() {
           <CodeInspector />
         )}
 
-        {/* TAB 3: AUTOMATED TEST SUITE & DIAGNOSTIC RUNNER */}
+        {/* TAB 3: TEST SUITE */}
         {activeTab === 'TESTS' && (
           <TestRunner />
         )}
 
-        {/* TAB 4: ARCHITECTURE & AUDIO ENGINE EXPLANATION */}
+        {/* TAB 4: ARCHITECTURE & RADIO MODES EXPLANATION */}
         {activeTab === 'ARCHITECTURE' && (
           <div className="flex flex-col gap-6">
             
-            {/* Header Card */}
             <div className="p-6 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800">
               <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
                 <Layers className="w-5 h-5 text-sky-400" />
-                Technical Architecture: RFCOMM Full-Duplex Audio Engine
+                Dual-Mode Radio Architecture (Bluetooth vs. Wi-Fi Hotspot)
               </h2>
               <p className="text-xs text-slate-400 max-w-3xl leading-relaxed">
-                In contrast to half-duplex walkie-talkies that cut off the receiver when transmitting, this application establishes a bidirectional full-duplex PCM audio pipe. Both smartphones capture, transmit, receive, and play 16,000Hz 16-bit audio simultaneously with hardware Acoustic Echo Cancellation (AEC).
+                BTAudioWalkieTalkie implements an adaptive dual-radio transport architecture. Users can toggle between short-range, ultra-low-power Bluetooth for two people, or long-range, multi-party Wi-Fi Hotspot LAN communication for groups.
               </p>
             </div>
 
-            {/* Interactive Flow Diagram */}
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col gap-6">
-              <h3 className="text-sm font-semibold text-slate-200">
-                Bidirectional Pipeline Topology
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                
-                {/* Node 1: Sender Pipeline */}
-                <div className="p-4 rounded-xl bg-slate-950 border border-sky-500/30 flex flex-col gap-2.5">
-                  <div className="flex items-center gap-2 text-sky-400 font-semibold text-xs">
-                    <Mic className="w-4 h-4" />
-                    <span>Sender Thread (Phone A)</span>
-                  </div>
-                  <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc list-inside">
-                    <li><strong className="text-slate-200">Source:</strong> MediaRecorder.AudioSource.VOICE_COMMUNICATION</li>
-                    <li><strong className="text-slate-200">Format:</strong> 16,000 Hz, 16-bit PCM Mono</li>
-                    <li><strong className="text-slate-200">DSP:</strong> AcousticEchoCanceler attached to sessionId</li>
-                    <li><strong className="text-slate-200">Buffer:</strong> 640 bytes (20ms frames) read continuously</li>
-                    <li><strong className="text-slate-200">Output:</strong> Written to <code className="text-sky-300">socket.outputStream</code></li>
-                  </ul>
+            {/* Comparison Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card 1: Bluetooth */}
+              <div className="p-5 rounded-2xl bg-slate-900 border border-sky-500/30 flex flex-col gap-3">
+                <div className="flex items-center gap-2 text-sky-400 font-bold text-sm">
+                  <Radio className="w-4 h-4" />
+                  Mode 1: Bluetooth (2 Persons, Low Power)
                 </div>
-
-                {/* Node 2: Bluetooth RFCOMM SPP Transport */}
-                <div className="p-4 rounded-xl bg-slate-950 border border-purple-500/30 flex flex-col gap-2.5 text-center">
-                  <div className="flex items-center justify-center gap-2 text-purple-400 font-semibold text-xs">
-                    <Radio className="w-4 h-4" />
-                    <span>RFCOMM Socket (UUID SPP)</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Direct L2CAP channel over Bluetooth Classic (BR/EDR). Bandwidth: 256 kbps (32 KB/s continuous stream). Roundtrip latency: ~30ms.
-                  </p>
-                  <div className="py-1 px-2 rounded bg-purple-950/50 border border-purple-800/40 text-[10px] font-mono text-purple-300">
-                    UUID: 00001101-0000-1000-8000-00805F9B34FB
-                  </div>
+                <div className="text-xs text-slate-300">
+                  <strong>Transport:</strong> Bluetooth RFCOMM SPP (UUID 00001101-0000-1000-8000-00805F9B34FB)
                 </div>
-
-                {/* Node 3: Receiver Pipeline */}
-                <div className="p-4 rounded-xl bg-slate-950 border border-teal-500/30 flex flex-col gap-2.5">
-                  <div className="flex items-center gap-2 text-teal-400 font-semibold text-xs">
-                    <Volume2 className="w-4 h-4" />
-                    <span>Receiver Thread (Phone B)</span>
-                  </div>
-                  <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc list-inside">
-                    <li><strong className="text-slate-200">Input:</strong> Blocking read from <code className="text-teal-300">socket.inputStream</code></li>
-                    <li><strong className="text-slate-200">Track:</strong> AudioTrack in <code className="text-teal-300">MODE_STREAM</code></li>
-                    <li><strong className="text-slate-200">Routing:</strong> AudioManager.STREAM_VOICE_CALL</li>
-                    <li><strong className="text-slate-200">AEC Sync:</strong> USAGE_VOICE_COMMUNICATION ties output to mic filter</li>
-                    <li><strong className="text-slate-200">Latency:</strong> Zero jitter-buffer delay, direct hardware DAC play</li>
-                  </ul>
-                </div>
-
+                <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
+                  <li><strong>Range:</strong> ~25–35 meters line-of-sight outdoors</li>
+                  <li><strong>Capacity:</strong> Strict 1-to-1 point-to-point (Server socket closes on accept)</li>
+                  <li><strong>Power:</strong> Low consumption (~2–3% battery per hour)</li>
+                  <li><strong>Audio:</strong> Uncompressed 16kHz 16-bit PCM Mono (256 kbps)</li>
+                  <li><strong>Echo Canceler:</strong> Hardware AcousticEchoCanceler coupled to AudioRecord session</li>
+                </ul>
               </div>
-            </div>
 
-            {/* Topology & 2-Device Concurrency Boundary */}
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col gap-4">
-              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                <Radio className="w-4 h-4 text-sky-400" />
-                Network Topology: Strict Point-to-Point (1-to-1) vs Multi-Device Mesh
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                <strong className="text-white">Can a third phone connect once two phones are linked?</strong> <span className="text-amber-300 font-semibold">No, absolutely not.</span> The application is strictly engineered for direct 1-to-1 duplex communication due to the following architectural design:
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-                  <h4 className="text-xs font-semibold text-sky-400 mb-1">1. Server Socket Close on Accept</h4>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    In <code className="text-sky-300 font-mono">BluetoothController.kt</code>, as soon as <code className="text-sky-300 font-mono">serverSocket.accept()</code> returns the socket for Phone B, Phone A calls <code className="text-sky-300 font-mono">serverSocket.close()</code>. The SPP service record unregisters from SDP, causing any connection attempt from a 3rd phone to immediately error out (<code className="text-slate-300 font-mono">Connection refused</code>).
-                  </p>
+              {/* Card 2: Wi-Fi Hotspot */}
+              <div className="p-5 rounded-2xl bg-slate-900 border border-emerald-500/30 flex flex-col gap-3">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                  <Wifi className="w-4 h-4" />
+                  Mode 2: Wi-Fi Hotspot (2–10 Phones, Long Range)
                 </div>
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-                  <h4 className="text-xs font-semibold text-teal-400 mb-1">2. Dedicated RFCOMM Bandwidth</h4>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Uncompressed 16kHz 16-bit PCM consumes 256 kbps in each direction (512 kbps total). A Bluetooth Classic BR/EDR ACL piconet link typically maxes out around 700–1000 kbps. Dedicating the link to 2 devices ensures zero packet dropouts and low latency (&lt;35ms).
-                  </p>
+                <div className="text-xs text-slate-300">
+                  <strong>Transport:</strong> Local UDP Multicast (239.255.0.1:50005) or Subnet Broadcast
                 </div>
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-                  <h4 className="text-xs font-semibold text-emerald-400 mb-1">3. Private Session Security</h4>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Because the server listener ceases listening once a peer binds, neither third-party eavesdropping nor accidental packet injection can occur over the established voice link.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Why VOICE_COMMUNICATION is Critical */}
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col gap-4">
-              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                Why VOICE_COMMUNICATION and AcousticEchoCanceler are Essential
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                If an Android app uses standard <code className="text-slate-200 font-mono">AudioSource.MIC</code> and <code className="text-slate-200 font-mono">STREAM_MUSIC</code> in full-duplex, the audio coming out of Phone B&apos;s speaker is immediately picked up by Phone B&apos;s microphone and sent back to Phone A. This creates a deafening, exponential acoustic feedback loop (the howling sound).
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
-                  <h4 className="text-xs font-semibold text-slate-300 mb-1">Standard Audio (Feedback Loop)</h4>
-                  <p className="text-[11px] text-rose-400">
-                    Mic -&gt; RFCOMM -&gt; Speaker -&gt; Mic -&gt; RFCOMM -&gt; Speaker (Echo loop builds indefinitely)
-                  </p>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
-                  <h4 className="text-xs font-semibold text-slate-300 mb-1">Our VOICE_COMMUNICATION Pipeline</h4>
-                  <p className="text-[11px] text-emerald-400">
-                    AcousticEchoCanceler tracks the reference signal playing through AudioTrack (STREAM_VOICE_CALL) and subtracts it from AudioRecord before sending bytes over Bluetooth.
-                  </p>
-                </div>
+                <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
+                  <li><strong>Range:</strong> ~70–100+ meters outdoors (penetrates 2–3 interior walls)</li>
+                  <li><strong>Capacity:</strong> 2 to 10+ phones simultaneously on Channel 1</li>
+                  <li><strong>Power:</strong> High consumption on host (~15% battery per hour)</li>
+                  <li><strong>Zero Data:</strong> Operates entirely on offline local Wi-Fi LAN; 0 cellular data used</li>
+                  <li><strong>Multicast Lock:</strong> Uses WifiManager.MulticastLock to prevent packet dropping</li>
+                </ul>
               </div>
             </div>
 
@@ -650,16 +658,15 @@ export default function App() {
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-800/80 bg-slate-950 py-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>BTAudioWalkieTalkie • Standalone Android Application &amp; Testbench</span>
+          <span>BTAudioWalkieTalkie • Dual-Mode Android Application &amp; Testbench</span>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => downloadProjectZip()}
-              className="text-sky-400 hover:text-sky-300 transition"
-            >
-              Export Project (.zip)
+            <button onClick={() => downloadApkDirectly()} className="text-emerald-400 hover:text-emerald-300 font-semibold transition">
+              Download .APK
             </button>
             <span>•</span>
-            <span>RFCOMM SPP (UUID 00001101-0000-1000-8000-00805F9B34FB)</span>
+            <button onClick={() => downloadProjectZip()} className="text-sky-400 hover:text-sky-300 transition">
+              Export Project (.ZIP)
+            </button>
           </div>
         </div>
       </footer>

@@ -79,16 +79,43 @@ with open(f"{BASE}/res/layout/activity_main.xml", "w") as f:
         android:layout_height="wrap_content"
         android:text="BTAudioWalkieTalkie"
         android:textColor="#FFFFFF"
-        android:textSize="22sp"
+        android:textSize="20sp"
         android:textStyle="bold" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="RFCOMM 16kHz PCM Full-Duplex"
+        android:text="Dual-Mode Voice Link: Bluetooth &amp; Wi-Fi Hotspot"
         android:textColor="#94A3B8"
-        android:textSize="12sp"
-        android:layout_marginBottom="16dp" />
+        android:textSize="11sp"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Radio Mode Selector -->
+    <RadioGroup
+        android:id="@+id/rgMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#1E293B"
+        android:padding="8dp"
+        android:layout_marginBottom="12dp">
+
+        <RadioButton
+            android:id="@+id/rbBluetooth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Bluetooth (low power consumption / short range / 2 persons)"
+            android:textColor="#38BDF8"
+            android:textSize="11sp" />
+
+        <RadioButton
+            android:id="@+id/rbWifi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="WiFiHotspot (high power consumption / long range / 2-10 phones)"
+            android:textColor="#34D399"
+            android:textSize="11sp" />
+    </RadioGroup>
 
     <TextView
         android:id="@+id/tvStatus"
@@ -97,34 +124,52 @@ with open(f"{BASE}/res/layout/activity_main.xml", "w") as f:
         android:text="Status: Disconnected"
         android:background="#1E293B"
         android:textColor="#38BDF8"
-        android:padding="12dp"
-        android:textSize="14sp"
+        android:padding="10dp"
+        android:textSize="13sp"
         android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="12dp" />
 
     <LinearLayout
+        android:id="@+id/layoutBtButtons"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="12dp">
 
         <Button
             android:id="@+id/btnHost"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Host Link"
+            android:text="Host BT Link"
             android:backgroundTint="#0284C7"
             android:textColor="#FFFFFF"
-            android:layout_marginEnd="8dp" />
+            android:layout_marginEnd="6dp" />
 
         <Button
             android:id="@+id/btnScan"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Scan Peers"
+            android:text="Scan BT Peers"
             android:backgroundTint="#334155"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/layoutWifiButtons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:layout_marginBottom="12dp">
+
+        <Button
+            android:id="@+id/btnJoinWifi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Join / Start Group Channel 1"
+            android:backgroundTint="#10B981"
             android:textColor="#FFFFFF" />
     </LinearLayout>
 
@@ -132,10 +177,10 @@ with open(f"{BASE}/res/layout/activity_main.xml", "w") as f:
         android:id="@+id/tvMetrics"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="AEC: Hardware Ready | Format: 16kHz 16-bit Mono (256 kbps)"
+        android:text="Hardware AEC: Active | 16kHz 16-bit PCM (256 kbps)"
         android:textColor="#64748B"
-        android:textSize="11sp"
-        android:layout_marginBottom="16dp" />
+        android:textSize="10sp"
+        android:layout_marginBottom="10dp" />
 
     <ListView
         android:id="@+id/listDevices"
@@ -145,18 +190,18 @@ with open(f"{BASE}/res/layout/activity_main.xml", "w") as f:
         android:background="#1E293B"
         android:divider="#334155"
         android:dividerHeight="1dp"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="12dp" />
 
     <Button
         android:id="@+id/btnMuteToggle"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="56dp"
         android:text="MIC LIVE (FULL DUPLEX)"
         android:backgroundTint="#10B981"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:textSize="16sp"
-        android:layout_marginBottom="12dp" />
+        android:textSize="14sp"
+        android:layout_marginBottom="8dp" />
 
     <Button
         android:id="@+id/btnDisconnect"

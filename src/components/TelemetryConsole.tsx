@@ -16,6 +16,9 @@ interface TelemetryConsoleProps {
   telemetryA: AudioTelemetry;
   telemetryB: AudioTelemetry;
   isConnected: boolean;
+  isWifiActive?: boolean;
+  radioMode?: 'BLUETOOTH' | 'WIFI_HOTSPOT';
+  onlinePeersCount?: number;
   logs: PacketLog[];
   onSimulateInterference: () => void;
   onClearLogs: () => void;
@@ -25,19 +28,23 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
   telemetryA,
   telemetryB,
   isConnected,
+  isWifiActive = false,
+  radioMode = 'BLUETOOTH',
+  onlinePeersCount = 1,
   logs,
   onSimulateInterference,
   onClearLogs
 }) => {
-  const [filter, setFilter] = useState<'ALL' | 'AUDIO' | 'RFCOMM'>('ALL');
+  const [filter, setFilter] = useState<'ALL' | 'AUDIO' | 'NETWORK'>('ALL');
 
   const filteredLogs = logs.filter(log => {
-    if (filter === 'AUDIO') return log.type === 'PCM_AUDIO_CHUNK' || log.type === 'AEC_FILTER';
-    if (filter === 'RFCOMM') return log.type === 'RFCOMM_HANDSHAKE' || log.type === 'SOCKET_EVENT';
+    if (filter === 'AUDIO') return log.type === 'PCM_AUDIO_CHUNK' || log.type === 'AEC_FILTER' || log.type === 'AUDIO';
+    if (filter === 'NETWORK') return log.type === 'RFCOMM_HANDSHAKE' || log.type === 'SOCKET_EVENT' || log.type === 'WIFI_MULTICAST' || log.type === 'WIFI_HEARTBEAT';
     return true;
   });
 
   const totalBytes = telemetryA.bytesSent + telemetryB.bytesSent;
+  const isLinkActive = radioMode === 'BLUETOOTH' ? isConnected : isWifiActive;
 
   return (
     <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 text-slate-200">
@@ -50,16 +57,18 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
           </div>
           <div>
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              RFCOMM Socket &amp; Audio Telemetry
-              {isConnected && (
+              {radioMode === 'BLUETOOTH' ? 'Bluetooth RFCOMM Socket Telemetry' : 'Wi-Fi UDP Multicast Channel Telemetry'}
+              {isLinkActive && (
                 <span className="flex items-center gap-1 text-[11px] font-normal text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Full-Duplex Stream Active
+                  {radioMode === 'BLUETOOTH' ? '1-to-1 Stream Active' : `Group Channel Active (${onlinePeersCount} phones)`}
                 </span>
               )}
             </h3>
             <p className="text-xs text-slate-400">
-              Real-time monitoring of 16kHz 16-bit PCM streaming over Bluetooth Serial Port Profile (SPP)
+              {radioMode === 'BLUETOOTH' 
+                ? 'Low-power 16kHz PCM streaming over Bluetooth Serial Port Profile (~25m range)'
+                : 'High-speed UDP datagram broadcast on port 50005 across Wi-Fi Hotspot LAN (~100m range)'}
             </p>
           </div>
         </div>
@@ -68,11 +77,11 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onSimulateInterference}
-            disabled={!isConnected}
+            disabled={!isLinkActive}
             className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <WifiOff className="w-3.5 h-3.5" />
-            Inject RF Jitter / Packet Drop
+            Inject Jitter / Packet Drop
           </button>
           <button
             onClick={onClearLogs}
@@ -88,67 +97,75 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-sky-400" />
-            PCM Throughput
+            Transport Mode
           </span>
-          <span className="text-lg font-bold text-white mt-1 font-mono">
-            {isConnected ? '32.0 KB/s' : '0.0 KB/s'}
+          <span className="text-base font-bold text-white mt-1 font-mono">
+            {radioMode === 'BLUETOOTH' ? 'BT RFCOMM' : 'UDP 50005'}
           </span>
-          <span className="text-[10px] text-slate-500 font-mono">256 kbps (16kHz x 16-bit)</span>
+          <span className="text-[10px] text-slate-500">
+            {radioMode === 'BLUETOOTH' ? 'Point-to-point SPP' : 'Multicast 239.255.0.1'}
+          </span>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-teal-400" />
-            Chunk Size
+            Effective Range
           </span>
-          <span className="text-lg font-bold text-white mt-1 font-mono">
-            640 bytes
+          <span className="text-base font-bold text-white mt-1 font-mono">
+            {radioMode === 'BLUETOOTH' ? '~25 meters' : '~100 meters'}
           </span>
-          <span className="text-[10px] text-slate-500 font-mono">20ms frame (320 samples)</span>
+          <span className="text-[10px] text-slate-500 font-mono">
+            {radioMode === 'BLUETOOTH' ? 'Short range (2.5mW)' : 'Long range (100mW)'}
+          </span>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-indigo-400" />
-            Socket Latency
+            Capacity
           </span>
-          <span className="text-lg font-bold text-white mt-1 font-mono">
-            {isConnected ? `${telemetryA.latencyMs} ms` : '--'}
+          <span className="text-base font-bold text-white mt-1 font-mono">
+            {radioMode === 'BLUETOOTH' ? '2 persons' : '2–10 phones'}
           </span>
-          <span className="text-[10px] text-slate-500">RFCOMM buffering delay</span>
+          <span className="text-[10px] text-slate-500">
+            {radioMode === 'BLUETOOTH' ? 'Strict 1-to-1' : 'Multi-device group'}
+          </span>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-            AEC Attenuation
+            Hardware AEC
           </span>
-          <span className="text-lg font-bold text-emerald-400 mt-1 font-mono">
-            {isConnected ? '-24.5 dB' : '--'}
+          <span className="text-base font-bold text-emerald-400 mt-1 font-mono">
+            {isLinkActive ? 'ACTIVE (DSP)' : 'STANDBY'}
           </span>
-          <span className="text-[10px] text-slate-500">Echo loopback suppressed</span>
+          <span className="text-[10px] text-slate-500">VOICE_COMMUNICATION</span>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Terminal className="w-3.5 h-3.5 text-purple-400" />
-            Packets Tx/Rx
+            Packets Streamed
           </span>
-          <span className="text-lg font-bold text-white mt-1 font-mono">
+          <span className="text-base font-bold text-white mt-1 font-mono">
             {telemetryA.packetsSent + telemetryB.packetsSent}
           </span>
-          <span className="text-[10px] text-slate-500 font-mono">Total PCM frames</span>
+          <span className="text-[10px] text-slate-500 font-mono">640 B frames</span>
         </div>
 
         <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col">
           <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Sliders className="w-3.5 h-3.5 text-rose-400" />
-            Total Transferred
+            Battery Impact
           </span>
-          <span className="text-lg font-bold text-white mt-1 font-mono">
-            {(totalBytes / 1024).toFixed(1)} KB
+          <span className="text-base font-bold mt-1 font-mono text-white">
+            {radioMode === 'BLUETOOTH' ? 'Low (~2%/hr)' : 'High (~15%/hr)'}
           </span>
-          <span className="text-[10px] text-slate-500 font-mono">Raw bidirectional PCM</span>
+          <span className="text-[10px] text-slate-500">
+            {radioMode === 'BLUETOOTH' ? 'All-day voice' : 'Hotspot radio power'}
+          </span>
         </div>
       </div>
 
@@ -157,11 +174,11 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-slate-400" />
-            <span className="font-semibold text-slate-300">Bluetooth Socket &amp; Audio Engine Logs</span>
+            <span className="font-semibold text-slate-300">Live Radio Link &amp; Audio Packet Logs</span>
           </div>
 
           <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-            {(['ALL', 'RFCOMM', 'AUDIO'] as const).map(tab => (
+            {(['ALL', 'NETWORK', 'AUDIO'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setFilter(tab)}
@@ -177,13 +194,15 @@ export const TelemetryConsole: React.FC<TelemetryConsoleProps> = ({
 
         <div className="w-full h-44 rounded-xl bg-slate-950 border border-slate-800/90 p-3 font-mono text-[11px] overflow-y-auto space-y-1 scrollbar-thin">
           {filteredLogs.length === 0 ? (
-            <div className="text-slate-600 italic">No events logged yet. Host or connect to begin.</div>
+            <div className="text-slate-600 italic">No events logged yet. Select a mode and start talking.</div>
           ) : (
             filteredLogs.map(log => {
               const typeColor = 
                 log.type === 'RFCOMM_HANDSHAKE' ? 'text-sky-400' :
-                log.type === 'PCM_AUDIO_CHUNK' ? 'text-emerald-400' :
-                log.type === 'AEC_FILTER' ? 'text-indigo-400' :
+                log.type === 'WIFI_MULTICAST' ? 'text-emerald-400' :
+                log.type === 'WIFI_HEARTBEAT' ? 'text-teal-400' :
+                log.type === 'PCM_AUDIO_CHUNK' ? 'text-indigo-400' :
+                log.type === 'AEC_FILTER' ? 'text-purple-400' :
                 log.type === 'AUDIO' ? 'text-teal-400' :
                 'text-amber-400';
 

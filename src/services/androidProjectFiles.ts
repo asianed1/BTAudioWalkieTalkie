@@ -10,6 +10,167 @@ export interface ProjectFile {
 
 export const ANDROID_PROJECT_FILES: ProjectFile[] = [
   {
+    path: 'app/src/main/java/com/example/btaudiowalkietalkie/wifi/WifiAudioController.kt',
+    name: 'WifiAudioController.kt',
+    language: 'kotlin',
+    category: 'Kotlin Source',
+    content: `package com.example.btaudiowalkietalkie.wifi
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
+import android.net.wifi.WifiManager
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.MulticastSocket
+import java.nio.ByteBuffer
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+
+data class WifiChannelState(
+    val isActive: Boolean = false,
+    val channelNumber: Int = 1,
+    val isTransmitting: Boolean = false,
+    val isReceiving: Boolean = false,
+    val isMuted: Boolean = false,
+    val activeSpeaker: String? = null,
+    val onlinePeerCount: Int = 1,
+    val onlinePeers: List<String> = emptyList(),
+    val outgoingDb: Float = -60f,
+    val incomingDb: Float = -60f,
+    val packetsSent: Long = 0L,
+    val packetsReceived: Long = 0L
+)
+
+/**
+ * Handles group walkie-talkie communication over local Wi-Fi Hotspot or local Wi-Fi LAN
+ * using high-speed UDP Broadcast / Multicast datagram packets.
+ */
+class WifiAudioController(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val deviceName: String = "Android Device"
+) {
+    companion object {
+        const val DEFAULT_PORT = 50005
+        const val MULTICAST_IP = "239.255.0.1"
+        const val SAMPLE_RATE = 16000
+        const val CHUNK_SIZE = 640 // 20ms at 16kHz 16-bit mono
+        val MAGIC_BYTES = byteArrayOf('W'.code.toByte(), 'T'.code.toByte(), 'L'.code.toByte(), 'K'.code.toByte())
+        const val TYPE_AUDIO = 0x01.toByte()
+        const val TYPE_HEARTBEAT = 0x02.toByte()
+    }
+
+    private val deviceId = UUID.randomUUID().mostSignificantBits
+    private val _channelState = MutableStateFlow(WifiChannelState())
+    val channelState: StateFlow<WifiChannelState> = _channelState.asStateFlow()
+
+    private val isRunning = AtomicBoolean(false)
+    val isMuted = AtomicBoolean(false)
+
+    private var multicastLock: WifiManager.MulticastLock? = null
+    private var socket: DatagramSocket? = null
+    private var groupAddress: InetAddress? = null
+
+    private var audioRecord: AudioRecord? = null
+    private var audioTrack: AudioTrack? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+
+    private var senderThread: Thread? = null
+    private var receiverThread: Thread? = null
+    private var heartbeatJob: Job? = null
+    private val activePeersMap = ConcurrentHashMap<Long, Pair<String, Long>>()
+
+    @SuppressLint("MissingPermission")
+    fun startChannel(channelNumber: Int = 1) {
+        if (isRunning.get()) return
+        isRunning.set(true)
+
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        multicastLock = wifiManager?.createMulticastLock("BTAudioWalkieTalkieMulticast")?.apply {
+            setReferenceCounted(true)
+            acquire()
+        }
+
+        groupAddress = InetAddress.getByName(MULTICAST_IP)
+        val multicastSocket = MulticastSocket(DEFAULT_PORT).apply {
+            reuseAddress = true
+            timeToLive = 4
+            broadcast = true
+            try { joinGroup(groupAddress) } catch (ignored: Exception) {}
+        }
+        socket = multicastSocket
+
+        val minRecordBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            Math.max(minRecordBuf * 2, 2048)
+        )
+
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = AcousticEchoCanceler.create(audioRecord!!.audioSessionId)?.apply { enabled = true }
+        }
+
+        val minTrackBuf = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .setLegacyStreamType(AudioManager.STREAM_VOICE_CALL)
+            .build()
+
+        val audioFormat = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(SAMPLE_RATE)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+            .build()
+
+        audioTrack = AudioTrack(audioAttributes, audioFormat, Math.max(minTrackBuf * 2, 2048), AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE)
+        audioTrack?.play()
+        audioRecord?.startRecording()
+
+        _channelState.value = _channelState.value.copy(isActive = true, channelNumber = channelNumber)
+    }
+
+    fun stopChannel() {
+        if (!isRunning.getAndSet(false)) return
+        try { socket?.close() } catch (ignored: Exception) {}
+        socket = null
+        try { audioRecord?.apply { stop(); release() } } catch (ignored: Exception) {}
+        audioRecord = null
+        try { audioTrack?.apply { stop(); flush(); release() } } catch (ignored: Exception) {}
+        audioTrack = null
+        try { echoCanceler?.release() } catch (ignored: Exception) {}
+        echoCanceler = null
+        try { if (multicastLock?.isHeld == true) multicastLock?.release() } catch (ignored: Exception) {}
+        multicastLock = null
+        _channelState.value = WifiChannelState()
+    }
+}`
+  },
+  {
     path: 'app/src/main/java/com/example/btaudiowalkietalkie/MainActivity.kt',
     name: 'MainActivity.kt',
     language: 'kotlin',

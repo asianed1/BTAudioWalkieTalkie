@@ -8,6 +8,7 @@ cd "$DIR"
 echo "=== 1. Generating Android Manifest & Resources ==="
 python3 build.py
 
+rm -rf bin
 mkdir -p bin
 
 echo "=== 2. Generating R.java with AAPT ==="

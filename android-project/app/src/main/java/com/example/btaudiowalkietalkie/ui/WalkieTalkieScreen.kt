@@ -10,7 +10,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +36,8 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -63,10 +64,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.btaudiowalkietalkie.audio.AudioMetrics
 import com.example.btaudiowalkietalkie.bluetooth.ConnectionState
+import com.example.btaudiowalkietalkie.wifi.WifiChannelState
+
+enum class AppRadioMode {
+    BLUETOOTH,
+    WIFI_HOTSPOT
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WalkieTalkieScreen(
+    currentMode: AppRadioMode,
+    onSelectMode: (AppRadioMode) -> Unit,
+    // Bluetooth State
     connectionState: ConnectionState,
     pairedDevices: List<BluetoothDevice>,
     discoveredDevices: List<BluetoothDevice>,
@@ -77,8 +87,13 @@ fun WalkieTalkieScreen(
     onScanClicked: () -> Unit,
     onHostClicked: () -> Unit,
     onConnectDevice: (BluetoothDevice) -> Unit,
-    onDisconnect: () -> Unit,
-    onToggleMute: () -> Unit
+    onDisconnectBt: () -> Unit,
+    onToggleMuteBt: () -> Unit,
+    // Wi-Fi State
+    wifiState: WifiChannelState,
+    onStartWifiChannel: (Int) -> Unit,
+    onStopWifiChannel: () -> Unit,
+    onToggleMuteWifi: () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -86,12 +101,12 @@ fun WalkieTalkieScreen(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Radio,
+                            imageVector = if (currentMode == AppRadioMode.BLUETOOTH) Icons.Default.Radio else Icons.Default.WifiTethering,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            tint = if (currentMode == AppRadioMode.BLUETOOTH) MaterialTheme.colorScheme.primary else Color(0xFF10B981),
+                            modifier = Modifier.size(26.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
                                 text = "BTAudioWalkieTalkie",
@@ -99,7 +114,7 @@ fun WalkieTalkieScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "RFCOMM 16kHz Full-Duplex PCM",
+                                text = if (currentMode == AppRadioMode.BLUETOOTH) "Bluetooth Direct (1-to-1)" else "Wi-Fi Hotspot LAN (Group Channel)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -110,13 +125,13 @@ fun WalkieTalkieScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ),
                 actions = {
-                    if (connectionState is ConnectionState.Connected) {
-                        IconButton(onClick = onDisconnect) {
-                            Icon(
-                                imageVector = Icons.Default.CallEnd,
-                                contentDescription = "Disconnect",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                    if (currentMode == AppRadioMode.BLUETOOTH && connectionState is ConnectionState.Connected) {
+                        IconButton(onClick = onDisconnectBt) {
+                            Icon(Icons.Default.CallEnd, contentDescription = "Disconnect", tint = MaterialTheme.colorScheme.error)
+                        }
+                    } else if (currentMode == AppRadioMode.WIFI_HOTSPOT && wifiState.isActive) {
+                        IconButton(onClick = onStopWifiChannel) {
+                            Icon(Icons.Default.CallEnd, contentDescription = "Leave Channel", tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -127,71 +142,310 @@ fun WalkieTalkieScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
+                .padding(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Permission Banner if missing
             if (!hasPermissions) {
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Permissions Required", fontWeight = FontWeight.SemiBold)
-                            Text("Microphone and Bluetooth Scan/Connect permissions are needed.", style = MaterialTheme.typography.bodySmall)
+                            Text("Permissions Needed", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Microphone and Wireless permissions required.", style = MaterialTheme.typography.bodySmall)
                         }
                         Button(onClick = onRequestPermissions) {
-                            Text("Grant")
+                            Text("Grant", fontSize = 12.sp)
                         }
                     }
                 }
             }
 
-            // Connection Status Banner
-            ConnectionStatusCard(connectionState)
+            // Radio Mode Selector (Bluetooth vs Wi-Fi Hotspot)
+            RadioModeSelector(
+                selectedMode = currentMode,
+                onModeSelected = onSelectMode,
+                isBtConnected = connectionState is ConnectionState.Connected,
+                isWifiActive = wifiState.isActive
+            )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            when (connectionState) {
-                is ConnectionState.Connected -> {
-                    // Active Full-Duplex Talk Dashboard
-                    ActiveCallView(
-                        peerName = connectionState.deviceName,
-                        metrics = audioMetrics ?: AudioMetrics(),
-                        onToggleMute = onToggleMute,
-                        onDisconnect = onDisconnect
-                    )
+            // Content switch based on chosen radio mode
+            if (currentMode == AppRadioMode.BLUETOOTH) {
+                // BLUETOOTH VIEW
+                ConnectionStatusCard(connectionState)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                when (connectionState) {
+                    is ConnectionState.Connected -> {
+                        ActiveCallView(
+                            peerName = connectionState.deviceName,
+                            metrics = audioMetrics ?: AudioMetrics(),
+                            onToggleMute = onToggleMuteBt,
+                            onDisconnect = onDisconnectBt
+                        )
+                    }
+                    is ConnectionState.Listening -> {
+                        HostListeningView(onCancel = onDisconnectBt)
+                    }
+                    is ConnectionState.Connecting -> {
+                        ConnectingView(deviceName = connectionState.deviceName, onCancel = onDisconnectBt)
+                    }
+                    else -> {
+                        SetupConnectionView(
+                            pairedDevices = pairedDevices,
+                            discoveredDevices = discoveredDevices,
+                            isScanning = isScanning,
+                            onScanClicked = onScanClicked,
+                            onHostClicked = onHostClicked,
+                            onConnectDevice = onConnectDevice
+                        )
+                    }
                 }
-                is ConnectionState.Listening -> {
-                    // Host Waiting Screen
-                    HostListeningView(onCancel = onDisconnect)
-                }
-                is ConnectionState.Connecting -> {
-                    // Connecting Screen
-                    ConnectingView(deviceName = connectionState.deviceName, onCancel = onDisconnect)
-                }
-                else -> {
-                    // Disconnected: Device Connection & Discovery Center
-                    SetupConnectionView(
-                        pairedDevices = pairedDevices,
-                        discoveredDevices = discoveredDevices,
-                        isScanning = isScanning,
-                        onScanClicked = onScanClicked,
-                        onHostClicked = onHostClicked,
-                        onConnectDevice = onConnectDevice
-                    )
-                }
+            } else {
+                // WI-FI HOTSPOT VIEW
+                WifiHotspotChannelView(
+                    state = wifiState,
+                    onStartChannel = onStartWifiChannel,
+                    onStopChannel = onStopWifiChannel,
+                    onToggleMute = onToggleMuteWifi
+                )
             }
         }
     }
 }
 
+@Composable
+fun RadioModeSelector(
+    selectedMode: AppRadioMode,
+    onModeSelected: (AppRadioMode) -> Unit,
+    isBtConnected: Boolean,
+    isWifiActive: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                text = "RADIO LINK MODE",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.outline,
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Option 1: Bluetooth
+            ModeOptionRow(
+                title = "Bluetooth",
+                subtitle = "Low power consumption · Short range (~25m) · 2 persons",
+                icon = Icons.Default.Bluetooth,
+                isSelected = selectedMode == AppRadioMode.BLUETOOTH,
+                onClick = { if (!isWifiActive) onModeSelected(AppRadioMode.BLUETOOTH) }
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Option 2: Wi-Fi Hotspot
+            ModeOptionRow(
+                title = "Wi-Fi Hotspot",
+                subtitle = "High power consumption · Long range (~100m) · 2–10 phones",
+                icon = Icons.Default.Wifi,
+                isSelected = selectedMode == AppRadioMode.WIFI_HOTSPOT,
+                onClick = { if (!isBtConnected) onModeSelected(AppRadioMode.WIFI_HOTSPOT) }
+            )
+        }
+    }
+}
+
+@Composable
+fun ModeOptionRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.White))
+                }
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(text = title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(text = subtitle, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+fun WifiHotspotChannelView(
+    state: WifiChannelState,
+    onStartChannel: (Int) -> Unit,
+    onStopChannel: () -> Unit,
+    onToggleMute: () -> Unit
+) {
+    if (!state.isActive) {
+        // Setup Channel View
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("How Wi-Fi Hotspot Mode Works:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("1. One person turns on Android Portable Hotspot (Settings ➔ Hotspot).", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    Text("2. Other phones connect to that Wi-Fi network (No internet needed).", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    Text("3. All phones tap 'Join Channel 1' below to voice talk together!", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 24.dp)) {
+                Icon(Icons.Default.WifiTethering, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color(0xFF10B981))
+                Spacer(modifier = Modifier.height(14.dp))
+                Text("Group Channel 1 (Alpha Team)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("UDP Multicast Broadcast · Port 50005 · 16kHz PCM", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+            }
+
+            Button(
+                onClick = { onStartChannel(1) },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+            ) {
+                Icon(Icons.Default.Wifi, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Join / Start Group Channel", fontWeight = FontWeight.Bold)
+            }
+        }
+    } else {
+        // Active Wi-Fi Group Channel View
+        Column(modifier = Modifier.fillMaxSize()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B))
+            ) {
+                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.WifiTethering, contentDescription = null, tint = Color(0xFF34D399))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Active on Channel ${state.channelNumber} (Wi-Fi LAN)", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("${state.onlinePeerCount} Phones in Group · Range: ~100m", fontSize = 11.sp, color = Color(0xFFA7F3D0))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Online Group Members
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Group Members Online (${state.onlinePeerCount}):", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("• This Phone (You)", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    state.onlinePeers.forEach { peer ->
+                        Text("• $peer", fontSize = 11.sp, color = Color(0xFF10B981))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Audio Level Indicators
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AudioLevelIndicator(
+                    label = "Microphone (Tx)",
+                    icon = if (state.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                    levelDb = state.outgoingDb,
+                    isActive = !state.isMuted,
+                    modifier = Modifier.weight(1f)
+                )
+                AudioLevelIndicator(
+                    label = if (state.activeSpeaker != null) state.activeSpeaker!! else "Channel Audio (Rx)",
+                    icon = Icons.Default.VolumeUp,
+                    levelDb = state.incomingDb,
+                    isActive = state.isReceiving,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Big PTT Button for Wi-Fi Channel
+            Box(
+                modifier = Modifier
+                    .size(130.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .clip(CircleShape)
+                    .background(if (state.isMuted) MaterialTheme.colorScheme.errorContainer else Color(0xFF10B981))
+                    .clickable { onToggleMute() },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = if (state.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(46.dp)
+                    )
+                    Text(
+                        text = if (state.isMuted) "MIC MUTED" else "MIC LIVE",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = onStopChannel,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Icon(Icons.Default.CallEnd, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Leave Group Channel")
+            }
+        }
+    }
+}
+
+// Re-use Bluetooth subviews below:
 @Composable
 fun ConnectionStatusCard(state: ConnectionState) {
     val (statusText, statusColor) = when (state) {
@@ -206,23 +460,10 @@ fun ConnectionStatusCard(state: ConnectionState) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .clip(CircleShape)
-                    .background(statusColor)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(statusColor))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = statusText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -237,85 +478,55 @@ fun SetupConnectionView(
     onConnectDevice: (BluetoothDevice) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Quick Action Buttons: Host vs Scan
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = onHostClicked,
-                modifier = Modifier.weight(1f).height(50.dp),
+                modifier = Modifier.weight(1f).height(46.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Icon(Icons.Default.Bluetooth, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Host Connection")
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Host Connection", fontSize = 12.sp)
             }
-
             Button(
                 onClick = onScanClicked,
-                modifier = Modifier.weight(1f).height(50.dp),
+                modifier = Modifier.weight(1f).height(46.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
             ) {
                 if (isScanning) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scanning...")
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Scanning...", fontSize = 12.sp)
                 } else {
                     Icon(Icons.Default.BluetoothSearching, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scan & Discover")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Scan & Discover", fontSize = 12.sp)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Device Lists
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
-                Text(
-                    text = "Paired Devices",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Paired Devices", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
-
             if (pairedDevices.isEmpty()) {
                 item {
-                    Text(
-                        text = "No paired devices found. Pair in Android Settings or use Scan & Discover.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
+                    Text("No paired devices found.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                 }
             } else {
                 items(pairedDevices) { device ->
                     DeviceRowItem(device = device, isPaired = true, onConnect = { onConnectDevice(device) })
                 }
             }
-
             item {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "Discovered Nearby Devices",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    fontWeight = FontWeight.Bold
-                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Discovered Nearby", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
             }
-
             if (discoveredDevices.isEmpty()) {
                 item {
-                    Text(
-                        text = if (isScanning) "Searching for nearby Bluetooth RFCOMM peers..." else "Tap 'Scan & Discover' above to detect nearby devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
+                    Text(if (isScanning) "Searching..." else "Tap 'Scan & Discover' above.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                 }
             } else {
                 items(discoveredDevices) { device ->
@@ -329,32 +540,20 @@ fun SetupConnectionView(
 @Composable
 fun DeviceRowItem(device: BluetoothDevice, isPaired: Boolean, onConnect: () -> Unit) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onConnect),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onConnect),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Bluetooth,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.width(12.dp))
+        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Bluetooth, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 @Suppress("MissingPermission")
-                val name = try { device.name ?: "Unknown Device" } catch (e: SecurityException) { "Bluetooth Device" }
-                Text(text = name, fontWeight = FontWeight.Medium)
-                Text(text = device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                val name = try { device.name ?: device.address } catch (e: Exception) { "Bluetooth Device" }
+                Text(text = name, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                Text(text = device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, fontSize = 11.sp)
             }
-            Button(
-                onClick = onConnect,
-                modifier = Modifier.height(36.dp)
-            ) {
-                Text("Connect", fontSize = 12.sp)
+            Button(onClick = onConnect, modifier = Modifier.height(34.dp)) {
+                Text("Connect", fontSize = 11.sp)
             }
         }
     }
@@ -362,54 +561,22 @@ fun DeviceRowItem(device: BluetoothDevice, isPaired: Boolean, onConnect: () -> U
 
 @Composable
 fun HostListeningView(onCancel: () -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
-            modifier = Modifier
-                .size(120.dp)
-                .scale(scale)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+            modifier = Modifier.size(100.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Radio,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(54.dp)
-            )
+            Icon(Icons.Default.Radio, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(46.dp))
         }
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("Listening as RFCOMM Server", fontWeight = FontWeight.Bold)
+        Text("UUID: 00001101-0000-1000-8000-00805F9B34FB\nHave the second phone connect to this device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 6.dp))
         Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Listening as RFCOMM Server",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "UUID: 00001101-0000-1000-8000-00805F9B34FB\nHave the second phone scan and connect to this device.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(
-            onClick = onCancel,
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-        ) {
+        Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
             Text("Stop Hosting")
         }
     }
@@ -418,27 +585,15 @@ fun HostListeningView(onCancel: () -> Unit) {
 @Composable
 fun ConnectingView(deviceName: String, onCancel: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(modifier = Modifier.size(56.dp))
+        CircularProgressIndicator(modifier = Modifier.size(48.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Connecting to $deviceName...", fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Connecting to $deviceName...",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Establishing RFCOMM serial stream...",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(top = 6.dp)
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(onClick = onCancel) {
-            Text("Cancel")
-        }
+        Button(onClick = onCancel) { Text("Cancel") }
     }
 }
 
@@ -449,74 +604,24 @@ fun ActiveCallView(
     onToggleMute: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Peer Title Card
+    Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.BluetoothConnected, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Connected to $peerName", fontWeight = FontWeight.Bold)
-                    Text("Full-Duplex (Simultaneous Send & Receive)", style = MaterialTheme.typography.bodySmall)
+                    Text("Linked with $peerName", fontWeight = FontWeight.Bold)
+                    Text("Full-Duplex (Simultaneous Send & Receive)", style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Hardware Echo Cancellation & Audio Pipeline Telemetry
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("Hardware Audio Pipeline & Echo Cancellation", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Acoustic Echo Canceler (AEC):", style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        if (metrics.isEchoCancelerActive) "ACTIVE (Hardware)" else "Disabled / Unsupported",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (metrics.isEchoCancelerActive) Color(0xFF10B981) else Color(0xFFF59E0B)
-                    )
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Noise Suppressor (NS):", style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        if (metrics.isNoiseSuppressorActive) "ACTIVE" else "Inactive",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (metrics.isNoiseSuppressorActive) Color(0xFF10B981) else Color.Gray
-                    )
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Format / Bandwidth:", style = MaterialTheme.typography.bodySmall)
-                    Text("16kHz 16-bit PCM Mono (256 kbps)", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Bytes Transferred (Tx / Rx):", style = MaterialTheme.typography.bodySmall)
-                    Text("${metrics.bytesSent / 1024} KB / ${metrics.bytesReceived / 1024} KB", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Audio Meters (Outgoing Mic & Incoming Speaker)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             AudioLevelIndicator(
                 label = "Microphone (Tx)",
                 icon = if (metrics.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
@@ -535,17 +640,11 @@ fun ActiveCallView(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Giant PTT / Toggle Mute Button
-        val buttonColor by animateColorAsState(
-            targetValue = if (metrics.isMuted) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-            label = "btnColor"
-        )
-
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(130.dp)
                 .clip(CircleShape)
-                .background(buttonColor)
+                .background(if (metrics.isMuted) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary)
                 .clickable { onToggleMute() },
             contentAlignment = Alignment.Center
         ) {
@@ -553,36 +652,28 @@ fun ActiveCallView(
                 Icon(
                     imageVector = if (metrics.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                     contentDescription = null,
-                    tint = if (metrics.isMuted) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(50.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(46.dp)
                 )
-                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (metrics.isMuted) "MIC MUTED" else "MIC LIVE",
                     fontWeight = FontWeight.Bold,
-                    color = if (metrics.isMuted) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
-                    fontSize = 13.sp
+                    color = Color.White,
+                    fontSize = 12.sp
                 )
             }
         }
 
-        Text(
-            text = "Tap to mute / un-mute your mic in full duplex",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(top = 10.dp)
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         Button(
             onClick = onDisconnect,
-            modifier = Modifier.fillMaxWidth().height(48.dp),
+            modifier = Modifier.fillMaxWidth().height(46.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
             Icon(Icons.Default.CallEnd, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("End Voice Link")
+            Text("End Bluetooth Link")
         }
     }
 }
@@ -599,39 +690,23 @@ fun AudioLevelIndicator(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Normalized level 0.0f to 1.0f based on -60dB to 0dB
+            Spacer(modifier = Modifier.height(8.dp))
             val normalized = if (!isActive) 0f else ((levelDb + 60f) / 60f).coerceIn(0f, 1f)
-
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(12.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth(normalized)
-                        .height(12.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (normalized > 0.8f) Color(0xFFEF4444) else Color(0xFF10B981))
+                    modifier = Modifier.fillMaxWidth(normalized).height(10.dp).clip(RoundedCornerShape(5.dp)).background(if (normalized > 0.8f) Color(0xFFEF4444) else Color(0xFF10B981))
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${levelDb.toInt()} dBFS",
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.outline
-            )
+            Text(text = "${levelDb.toInt()} dBFS", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.outline)
         }
     }
 }

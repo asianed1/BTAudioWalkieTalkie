@@ -1,3 +1,5 @@
+export type RadioMode = 'BLUETOOTH' | 'WIFI_HOTSPOT';
+
 export type ConnectionState = 
   | 'disconnected'
   | 'listening'
@@ -26,13 +28,16 @@ export interface AudioTelemetry {
   noiseSuppressorEnabled: boolean;
   sampleRate: number;
   latencyMs: number;
+  // Wi-Fi specific
+  onlinePeersCount?: number;
+  channelNumber?: number;
 }
 
 export interface PacketLog {
   id: string;
   timestamp: string;
-  sender: 'Phone A' | 'Phone B';
-  type: 'RFCOMM_HANDSHAKE' | 'PCM_AUDIO_CHUNK' | 'SOCKET_EVENT' | 'AEC_FILTER' | 'AUDIO';
+  sender: 'Phone A' | 'Phone B' | 'Phone C (Group)';
+  type: 'RFCOMM_HANDSHAKE' | 'PCM_AUDIO_CHUNK' | 'SOCKET_EVENT' | 'AEC_FILTER' | 'AUDIO' | 'WIFI_MULTICAST' | 'WIFI_HEARTBEAT';
   detail: string;
   bytes?: number;
 }

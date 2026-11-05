@@ -22,8 +22,10 @@ import androidx.lifecycle.lifecycleScope
 import com.example.btaudiowalkietalkie.audio.AudioEngine
 import com.example.btaudiowalkietalkie.bluetooth.BluetoothController
 import com.example.btaudiowalkietalkie.bluetooth.ConnectionState
+import com.example.btaudiowalkietalkie.ui.AppRadioMode
 import com.example.btaudiowalkietalkie.ui.WalkieTalkieScreen
 import com.example.btaudiowalkietalkie.ui.theme.BTAudioWalkieTalkieTheme
+import com.example.btaudiowalkietalkie.wifi.WifiAudioController
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -31,34 +33,36 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var bluetoothController: BluetoothController
     private var audioEngine: AudioEngine? = null
+    private lateinit var wifiAudioController: WifiAudioController
 
+    private var currentMode by mutableStateOf(AppRadioMode.BLUETOOTH)
     private var hasPermissions by mutableStateOf(false)
 
-    // Permission launcher for Android 12+ and earlier
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
+        hasPermissions = allGranted
         if (allGranted) {
-            hasPermissions = true
             Toast.makeText(this, "Permissions granted", Toast.LENGTH_SHORT).show()
         } else {
-            hasPermissions = false
-            Toast.makeText(this, "Bluetooth and Microphone permissions required for voice link", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Required permissions needed for audio streaming", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val deviceModel = Build.MODEL ?: "Android Phone"
         bluetoothController = BluetoothController(this, lifecycleScope)
+        wifiAudioController = WifiAudioController(this, lifecycleScope, deviceModel)
+
         checkAndRequestPermissions()
 
-        // Listen for Bluetooth socket connection events to automatically start AudioEngine
+        // Auto-launch Bluetooth AudioEngine when RFCOMM socket is connected
         bluetoothController.connectionState.onEach { state ->
             when (state) {
                 is ConnectionState.Connected -> {
-                    // Launch full-duplex AudioEngine automatically once RFCOMM socket is ready
                     audioEngine?.stopEngine()
                     audioEngine = AudioEngine(state.socket) { errorReason ->
                         runOnUiThread {
@@ -73,7 +77,7 @@ class MainActivity : ComponentActivity() {
                     audioEngine?.stopEngine()
                     audioEngine = null
                 }
-                else -> { /* In transition */ }
+                else -> {}
             }
         }.launchIn(lifecycleScope)
 
@@ -91,8 +95,21 @@ class MainActivity : ComponentActivity() {
                     }
 
                     val audioMetrics = audioEngine?.metrics?.collectAsState()?.value
+                    val wifiState by wifiAudioController.channelState.collectAsState()
 
                     WalkieTalkieScreen(
+                        currentMode = currentMode,
+                        onSelectMode = { mode ->
+                            if (mode != currentMode) {
+                                // Stop previous mode
+                                if (currentMode == AppRadioMode.BLUETOOTH) {
+                                    bluetoothController.disconnect()
+                                } else {
+                                    wifiAudioController.stopChannel()
+                                }
+                                currentMode = mode
+                            }
+                        },
                         connectionState = connectionState,
                         pairedDevices = pairedDevices,
                         discoveredDevices = discoveredDevices,
@@ -106,10 +123,17 @@ class MainActivity : ComponentActivity() {
                         },
                         onHostClicked = { bluetoothController.hostConnection() },
                         onConnectDevice = { device -> bluetoothController.connectToDevice(device) },
-                        onDisconnect = { bluetoothController.disconnect() },
-                        onToggleMute = {
+                        onDisconnectBt = { bluetoothController.disconnect() },
+                        onToggleMuteBt = {
                             val muted = audioEngine?.isMuted?.get() ?: false
                             audioEngine?.setMuted(!muted)
+                        },
+                        wifiState = wifiState,
+                        onStartWifiChannel = { channelId -> wifiAudioController.startChannel(channelId) },
+                        onStopWifiChannel = { wifiAudioController.stopChannel() },
+                        onToggleMuteWifi = {
+                            val muted = wifiAudioController.isMuted.get()
+                            wifiAudioController.setMuted(!muted)
                         }
                     )
                 }
@@ -120,31 +144,22 @@ class MainActivity : ComponentActivity() {
     private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
-        // Audio permission
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
         }
 
-        // Bluetooth permissions based on Android API level
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+ (API 31+)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN)
             }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
             }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_ADVERTISE)
             }
         } else {
-            // Android 11 and lower
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
         }
@@ -160,5 +175,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         audioEngine?.stopEngine()
         bluetoothController.release()
+        wifiAudioController.stopChannel()
     }
 }
